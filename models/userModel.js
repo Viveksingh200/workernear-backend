@@ -37,4 +37,6 @@ import mongoose from "mongoose";
     {timestamps: true}
 );
 
+userSchema.index({ phone: 1, role: 1 }, { unique: true });
+
 export const User = mongoose.model("User", userSchema);

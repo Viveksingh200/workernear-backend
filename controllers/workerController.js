@@ -29,20 +29,23 @@ export const getAllWorkers = async (req, res) => {
       ];
     }
 
+    let parsedCity = "";
+    let parsedArea = "";
+
     if (city) {
       if (city.includes(",")) {
         const parts = city.split(",");
-        const parsedArea = parts[0].trim();
-        const parsedCity = parts[1].trim();
+        parsedArea = parts[0].trim();
+        parsedCity = parts[1].trim();
         filter.city = new RegExp(parsedCity, "i");
-        filter.area = new RegExp(parsedArea, "i");
       } else {
-        filter.city = new RegExp(city, "i");
+        parsedCity = city.trim();
+        filter.city = new RegExp(parsedCity, "i");
       }
     }
 
     if (area) {
-      filter.area = new RegExp(area, "i");
+      parsedArea = area.trim();
     }
 
     if (rating) {
@@ -50,22 +53,58 @@ export const getAllWorkers = async (req, res) => {
     }
 
     if (search) {
-      filter.$or = [
+      const searchOr = [
         { name: new RegExp(search, "i") },
         { profession: new RegExp(search, "i") },
         { serviceCategories: { $in: [new RegExp(search, "i")] } },
         { city: new RegExp(search, "i") },
         { area: new RegExp(search, "i") }
       ];
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchOr;
+      }
     }
 
     const skipIndex = (parseInt(page) - 1) * parseInt(limit);
-    const workers = await Worker.find(filter)
-      .sort({ rankingScore: -1, rating: -1, totalReviews: -1 })
-      .skip(skipIndex)
-      .limit(parseInt(limit));
 
-    const total = await Worker.countDocuments(filter);
+    const pipeline = [
+      { $match: filter }
+    ];
+
+    if (parsedArea) {
+      pipeline.push({
+        $addFields: {
+          locationScore: {
+            $cond: [
+              { $regexMatch: { input: "$area", regex: new RegExp(parsedArea, "i") } },
+              1000,
+              0
+            ]
+          }
+        }
+      });
+      pipeline.push({
+        $sort: { locationScore: -1, rankingScore: -1, rating: -1, totalReviews: -1 }
+      });
+    } else {
+      pipeline.push({
+        $sort: { rankingScore: -1, rating: -1, totalReviews: -1 }
+      });
+    }
+
+    pipeline.push({
+      $facet: {
+        metadata: [{ $count: "total" }],
+        data: [{ $skip: skipIndex }, { $limit: parseInt(limit) }]
+      }
+    });
+
+    const result = await Worker.aggregate(pipeline);
+    const total = result[0].metadata[0] ? result[0].metadata[0].total : 0;
+    const workers = result[0].data;
 
     return res.status(200).json({
       success: true,
@@ -163,10 +202,16 @@ export const updateWorkerProfile = async (req, res) => {
       }
     });
 
-    if (req.body.name) {
-      const baseSlug = slugify(req.body.name);
-      const suffix = worker.phone.toString().slice(-4);
-      worker.slug = `${baseSlug}-${suffix}`;
+    if (req.body.name !== undefined || req.body.profession !== undefined) {
+      const oldFormatSlug = `${slugify(worker.name)}-${worker.phone.toString().slice(-4)}`;
+      if (worker.slug === oldFormatSlug) {
+        const nameForSlug = req.body.name || worker.name;
+        const professionForSlug = req.body.profession !== undefined ? req.body.profession : worker.profession;
+        const baseSlug = slugify(nameForSlug);
+        const suffix = worker.phone.toString().slice(-4);
+        const professionSlugPart = professionForSlug ? `${slugify(professionForSlug)}-` : "";
+        worker.slug = `${professionSlugPart}${baseSlug}-${suffix}`;
+      }
     }
 
     await worker.save();

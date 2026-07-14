@@ -23,9 +23,23 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({message: "All fields are required!"});
         };
 
-        const existingUser = await User.findOne({phone});
-        if(existingUser){
-            return res.status(400).json({message: "User with this phone number already exists!"});
+        const assignedRole = role || "user";
+
+        // Check if an account with this exact phone AND role exists
+        const existingUserWithRole = await User.findOne({phone, role: assignedRole});
+        if(existingUserWithRole){
+            const roleName = assignedRole === "provider" ? "professional" : "customer";
+            return res.status(400).json({message: `You are already registered as a ${roleName} with this phone number.`});
+        }
+
+        // Check if they have another account with this phone but a different role
+        // If so, their new password MUST be different from the other account's password.
+        const otherRoleAccounts = await User.find({ phone });
+        for (const account of otherRoleAccounts) {
+            const passwordMatches = await bcrypt.compare(password, account.password);
+            if (passwordMatches) {
+                return res.status(400).json({message: "You must use a different password for your customer and professional accounts."});
+            }
         }
 
         const salt = await bcrypt.genSalt(10);
@@ -35,7 +49,7 @@ export const registerUser = async (req, res) => {
             name: name,
             phone: phone,
             password: hashedPassword,
-            role: role || "user",
+            role: assignedRole,
             city: req.body.city || "",
             area: req.body.area || "",
             country: country || ""
@@ -43,15 +57,16 @@ export const registerUser = async (req, res) => {
 
         // If the registering user is a worker/provider, initialize their profile
         if (role === "provider") {
+            const professionSlug = req.body.profession ? `${slugify(req.body.profession)}-` : "";
             const baseSlug = slugify(name);
             const suffix = phone.toString().slice(-4);
-            const slug = `${baseSlug}-${suffix}`;
+            const slug = `${professionSlug}${baseSlug}-${suffix}`;
 
             await Worker.create({
                 userId: newUser._id,
                 name: newUser.name,
                 phone: newUser.phone.toString(),
-                profession: req.body.profession || "Pending Setup",
+                profession: req.body.profession || "",
                 description: req.body.description || "",
                 experience: req.body.experience || 0,
                 serviceCategories: req.body.serviceCategories || [],
@@ -85,17 +100,26 @@ export const loginUser = async (req, res) => {
             return res.status(400).json({message: "All fields are required!"});
         }
 
-        const user = await User.findOne({phone});
+        const users = await User.find({phone});
 
-        if(!user){
+        if(!users || users.length === 0){
             return res.status(404).json({message: "User not found!"})
         }
 
-        const matchedPassword = await bcrypt.compare(password, user.password);
+        let loggedInUser = null;
+        for (const u of users) {
+            const matchedPassword = await bcrypt.compare(password, u.password);
+            if (matchedPassword) {
+                loggedInUser = u;
+                break;
+            }
+        }
 
-        if(!matchedPassword){
+        if(!loggedInUser){
             return res.status(403).json({message: "Invalid credentials!"});
         }
+
+        const user = loggedInUser;
 
         const payload = {
             id: user._id,
