@@ -312,4 +312,89 @@ export const refreshAccessToken = async (req, res) => {
         console.error("Refresh token verification failed:", error);
         return res.status(401).json({ success: false, message: "Invalid or expired refresh token!" });
     }
+};
+
+export const forgotPassword = async (req, res) => {
+    try {
+        const { phone } = req.body;
+        if (!phone) {
+            return res.status(400).json({ message: "Phone number is required!" });
+        }
+
+        const users = await User.find({ phone });
+        if (!users || users.length === 0) {
+            return res.status(404).json({ message: "No account found with this phone number!" });
+        }
+
+        // Generate mock OTP
+        const otp = "123456";
+        const salt = await bcrypt.genSalt(10);
+        const hashedOtp = await bcrypt.hash(otp, salt);
+
+        // Update all users with this phone number with the OTP
+        for (const user of users) {
+            user.resetOtp = hashedOtp;
+            user.resetOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 mins expiry
+            await user.save();
+        }
+
+        // Here you would normally integrate Twilio or MSG91 to send the SMS
+        console.log(`[MOCK SMS] OTP for ${phone} is ${otp}`);
+
+        return res.status(200).json({
+            success: true,
+            message: "OTP sent successfully to your phone number!"
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: error.message || "Internal server error" });
+    }
+};
+
+export const resetPassword = async (req, res) => {
+    try {
+        const { phone, otp, newPassword } = req.body;
+        if (!phone || !otp || !newPassword) {
+            return res.status(400).json({ message: "Phone number, OTP, and new password are required!" });
+        }
+
+        const users = await User.find({ phone });
+        if (!users || users.length === 0) {
+            return res.status(404).json({ message: "No account found with this phone number!" });
+        }
+
+        // We can just verify the OTP against the first user found since all have the same OTP in our design
+        const primaryUser = users[0];
+
+        if (!primaryUser.resetOtp || !primaryUser.resetOtpExpiry) {
+            return res.status(400).json({ message: "No OTP request found for this phone number." });
+        }
+
+        if (primaryUser.resetOtpExpiry < new Date()) {
+            return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+        }
+
+        const isMatch = await bcrypt.compare(otp, primaryUser.resetOtp);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Invalid OTP!" });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        for (const user of users) {
+            user.password = hashedPassword;
+            user.resetOtp = undefined;
+            user.resetOtpExpiry = undefined;
+            await user.save();
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Password reset successfully! You can now log in."
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: error.message || "Internal server error" });
+    }
 };

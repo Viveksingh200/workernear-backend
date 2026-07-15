@@ -32,6 +32,13 @@ import mongoose from "mongoose";
     country: {
         type: String,
         default: ""
+    },
+    resetOtp: {
+        type: String,
+        default: ""
+    },
+    resetOtpExpiry: {
+        type: Date
     }
 },
     {timestamps: true}
