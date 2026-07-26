@@ -2,6 +2,7 @@ import { User } from "../models/userModel.js";
 import { Worker } from "../models/workerModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { sendSms } from "../utils/sendSms.js";
 
 // Helper function to slugify names
 const slugify = (text) => {
@@ -326,8 +327,8 @@ export const forgotPassword = async (req, res) => {
             return res.status(404).json({ message: "No account found with this phone number!" });
         }
 
-        // Generate mock OTP
-        const otp = "123456";
+        // Generate random 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const salt = await bcrypt.genSalt(10);
         const hashedOtp = await bcrypt.hash(otp, salt);
 
@@ -338,12 +339,12 @@ export const forgotPassword = async (req, res) => {
             await user.save();
         }
 
-        // Here you would normally integrate Twilio or MSG91 to send the SMS
-        console.log(`[MOCK SMS] OTP for ${phone} is ${otp}`);
+        // Send OTP via Twilio SMS (or fallback to mock console log if keys are unconfigured)
+        await sendSms(phone, `Your OTP for Local Service Finder password reset is ${otp}. Valid for 10 minutes.`);
 
         return res.status(200).json({
             success: true,
-            message: "OTP sent successfully to your phone number!"
+            message: "OTP sent successfully!"
         });
     } catch (error) {
         console.error(error);
