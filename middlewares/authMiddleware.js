@@ -25,7 +25,19 @@ export const checkUserAuth = async (req, res, next) => {
         req.user.role = user.role; // ensure fresh role
         next();
     } catch (error) {
-        console.log(error);
-        return res.status(401).json({message: "Authentication failed. Invalid or expired token."});
+        if (error.name === "TokenExpiredError") {
+            console.warn(`[Auth] Token expired for request: ${req.originalUrl}`);
+            return res.status(401).json({
+                success: false,
+                message: "Token expired",
+                code: "TOKEN_EXPIRED"
+            });
+        }
+        console.error(`[Auth] Authentication failed: ${error.message}`);
+        return res.status(401).json({
+            success: false,
+            message: "Authentication failed. Invalid token.",
+            code: "INVALID_TOKEN"
+        });
     }
 }
