@@ -21,7 +21,7 @@ const workerSchema = new mongoose.Schema(
 
     profession: {
       type: String,
-      required: true,
+      default: "Pending Setup",
       trim: true
     },
     description: {
@@ -116,7 +116,8 @@ workerSchema.methods.calculateCompletion = function () {
   ];
   let filledFields = 0;
   fields.forEach((field) => {
-    if (this[field] !== undefined && this[field] !== null && this[field].toString().trim() !== "") {
+    const val = this[field] ? this[field].toString().trim() : "";
+    if (val !== "" && val !== "Pending Setup" && val !== "Pending") {
       filledFields++;
     }
   });

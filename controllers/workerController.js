@@ -19,7 +19,7 @@ const slugify = (text) => {
 // GET all approved workers with filtering, search, and ranking-based sorting
 export const getAllWorkers = async (req, res) => {
   try {
-    const { category, city, area, rating, search, page = 1, limit = 10 } = req.query;
+    const { category, city, area, rating, search, sortBy, page = 1, limit = 10 } = req.query;
     const filter = { approved: true };
 
     if (category) {
@@ -74,26 +74,44 @@ export const getAllWorkers = async (req, res) => {
       { $match: filter }
     ];
 
-    if (parsedArea) {
+    if (parsedArea || parsedCity || sortBy === "nearby") {
       pipeline.push({
         $addFields: {
           locationScore: {
-            $cond: [
-              { $regexMatch: { input: "$area", regex: new RegExp(parsedArea, "i") } },
-              1000,
-              0
+            $add: [
+              parsedArea ? {
+                $cond: [
+                  { $regexMatch: { input: { $ifNull: ["$area", ""] }, regex: new RegExp(parsedArea, "i") } },
+                  1000,
+                  0
+                ]
+              } : 0,
+              parsedCity ? {
+                $cond: [
+                  { $regexMatch: { input: { $ifNull: ["$city", ""] }, regex: new RegExp(parsedCity, "i") } },
+                  500,
+                  0
+                ]
+              } : 0
             ]
           }
         }
       });
-      pipeline.push({
-        $sort: { locationScore: -1, rankingScore: -1, rating: -1, totalReviews: -1 }
-      });
-    } else {
-      pipeline.push({
-        $sort: { rankingScore: -1, rating: -1, totalReviews: -1 }
-      });
     }
+
+    // Determine sorting criteria
+    let sortCriteria = {};
+    if (sortBy === "most_reviewed") {
+      sortCriteria = { totalReviews: -1, rating: -1, rankingScore: -1 };
+    } else if (sortBy === "top_rated") {
+      sortCriteria = { rating: -1, totalReviews: -1, rankingScore: -1 };
+    } else if (sortBy === "nearby" || parsedArea || parsedCity) {
+      sortCriteria = { locationScore: -1, totalReviews: -1, rating: -1, rankingScore: -1 };
+    } else {
+      sortCriteria = { rankingScore: -1, rating: -1, totalReviews: -1 };
+    }
+
+    pipeline.push({ $sort: sortCriteria });
 
     pipeline.push({
       $facet: {
@@ -198,9 +216,21 @@ export const updateWorkerProfile = async (req, res) => {
 
     editableFields.forEach((field) => {
       if (req.body[field] !== undefined) {
-        worker[field] = req.body[field];
+        if (field === "profession" && (!req.body[field] || req.body[field].toString().trim() === "")) {
+          worker[field] = "Pending Setup";
+        } else {
+          worker[field] = req.body[field];
+        }
       }
     });
+
+    if (!worker.profession || worker.profession.trim() === "") {
+      worker.profession = "Pending Setup";
+    }
+
+    if (worker.profession && worker.profession !== "Pending Setup" && (!worker.serviceCategories || worker.serviceCategories.length === 0)) {
+      worker.serviceCategories = [worker.profession];
+    }
 
     if (req.body.name !== undefined || req.body.profession !== undefined) {
       const oldFormatSlug = `${slugify(worker.name)}-${worker.phone.toString().slice(-4)}`;
@@ -209,7 +239,7 @@ export const updateWorkerProfile = async (req, res) => {
         const professionForSlug = req.body.profession !== undefined ? req.body.profession : worker.profession;
         const baseSlug = slugify(nameForSlug);
         const suffix = worker.phone.toString().slice(-4);
-        const professionSlugPart = professionForSlug ? `${slugify(professionForSlug)}-` : "";
+        const professionSlugPart = professionForSlug && professionForSlug !== "Pending Setup" ? `${slugify(professionForSlug)}-` : "";
         worker.slug = `${professionSlugPart}${baseSlug}-${suffix}`;
       }
     }

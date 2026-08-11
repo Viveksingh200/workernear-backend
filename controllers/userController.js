@@ -6,31 +6,31 @@ import { sendSms } from "../utils/sendSms.js";
 
 // Helper function to slugify names
 const slugify = (text) => {
-  return text
-    .toString()
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^\w\-]+/g, "")
-    .replace(/\-\-+/g, "-")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "");
+    return text
+        .toString()
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^\w\-]+/g, "")
+        .replace(/\-\-+/g, "-")
+        .replace(/^-+/, "")
+        .replace(/-+$/, "");
 };
 
 export const registerUser = async (req, res) => {
     try {
         const { name, phone, password, role, country } = req.body;
 
-        if(!name || !phone || !password){
-            return res.status(400).json({message: "All fields are required!"});
+        if (!name || !phone || !password) {
+            return res.status(400).json({ message: "All fields are required!" });
         };
 
         const assignedRole = role || "user";
 
         // Check if an account with this exact phone AND role exists
-        const existingUserWithRole = await User.findOne({phone, role: assignedRole});
-        if(existingUserWithRole){
+        const existingUserWithRole = await User.findOne({ phone, role: assignedRole });
+        if (existingUserWithRole) {
             const roleName = assignedRole === "provider" ? "professional" : "customer";
-            return res.status(400).json({message: `You are already registered as a ${roleName} with this phone number.`});
+            return res.status(400).json({ message: `You are already registered as a ${roleName} with this phone number.` });
         }
 
         // Check if they have another account with this phone but a different role
@@ -39,7 +39,7 @@ export const registerUser = async (req, res) => {
         for (const account of otherRoleAccounts) {
             const passwordMatches = await bcrypt.compare(password, account.password);
             if (passwordMatches) {
-                return res.status(400).json({message: "You must use a different password for your customer and professional accounts."});
+                return res.status(400).json({ message: "You must use a different password for your customer and professional accounts." });
             }
         }
 
@@ -67,7 +67,7 @@ export const registerUser = async (req, res) => {
                 userId: newUser._id,
                 name: newUser.name,
                 phone: newUser.phone.toString(),
-                profession: req.body.profession || "",
+                profession: req.body.profession || "Pending Setup",
                 description: req.body.description || "",
                 experience: req.body.experience || 0,
                 serviceCategories: req.body.serviceCategories || [],
@@ -89,22 +89,43 @@ export const registerUser = async (req, res) => {
         });
     } catch (error) {
         console.log(error);
-        res.status(500).json({message: error.message});
+        res.status(500).json({ message: error.message });
     }
+};
+
+const getOrCreateWorkerProfile = async (user) => {
+    let workerProfile = await Worker.findOne({ userId: user._id });
+    if (!workerProfile) {
+        const baseSlug = slugify(user.name || "worker");
+        const suffix = (user.phone || Math.floor(1000 + Math.random() * 9000)).toString().slice(-4);
+        const slug = `${baseSlug}-${suffix}`;
+        workerProfile = await Worker.create({
+            userId: user._id,
+            name: user.name,
+            phone: user.phone ? user.phone.toString() : "",
+            profession: "Pending Setup",
+            city: user.city || "Pending",
+            area: user.area || "Pending",
+            country: user.country || "",
+            slug: slug,
+            approved: false
+        });
+    }
+    return workerProfile;
 };
 
 export const loginUser = async (req, res) => {
     try {
-        const {phone, password} = req.body;
+        const { phone, password } = req.body;
 
-        if(!phone || !password){
-            return res.status(400).json({message: "All fields are required!"});
+        if (!phone || !password) {
+            return res.status(400).json({ message: "All fields are required!" });
         }
 
-        const users = await User.find({phone});
+        const users = await User.find({ phone });
 
-        if(!users || users.length === 0){
-            return res.status(404).json({message: "User not found!"})
+        if (!users || users.length === 0) {
+            return res.status(404).json({ message: "User not found!" })
         }
 
         let loggedInUser = null;
@@ -116,8 +137,8 @@ export const loginUser = async (req, res) => {
             }
         }
 
-        if(!loggedInUser){
-            return res.status(403).json({message: "Invalid credentials!"});
+        if (!loggedInUser) {
+            return res.status(403).json({ message: "Invalid credentials!" });
         }
 
         const user = loggedInUser;
@@ -139,7 +160,7 @@ export const loginUser = async (req, res) => {
 
         let workerProfile = null;
         if (user.role === "provider") {
-            workerProfile = await Worker.findOne({ userId: user._id });
+            workerProfile = await getOrCreateWorkerProfile(user);
         }
 
         return res.status(200).json({
@@ -162,7 +183,7 @@ export const loginUser = async (req, res) => {
         })
     } catch (error) {
         console.log(error);
-        res.status(500).json({message: error.message});
+        res.status(500).json({ message: error.message });
     }
 };
 
@@ -175,7 +196,7 @@ export const getUserProfile = async (req, res) => {
 
         let workerProfile = null;
         if (user.role === "provider") {
-            workerProfile = await Worker.findOne({ userId: user._id });
+            workerProfile = await getOrCreateWorkerProfile(user);
         }
 
         return res.status(200).json({
@@ -211,6 +232,9 @@ export const updateUserProfile = async (req, res) => {
         if (user.role === "provider") {
             const worker = await Worker.findOne({ userId: user._id });
             if (worker) {
+                if (!worker.profession || worker.profession === "") {
+                    worker.profession = "Pending Setup";
+                }
                 worker.name = name;
                 if (city !== undefined) worker.city = city;
                 if (area !== undefined) worker.area = area;
@@ -398,4 +422,4 @@ export const resetPassword = async (req, res) => {
         console.error(error);
         res.status(500).json({ message: error.message || "Internal server error" });
     }
-};
+};
