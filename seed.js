@@ -210,6 +210,14 @@ const seedDatabase = async () => {
     // Explicitly recalculate scores & trigger hooks to set correct profileCompletion & rankingScore
     const allSecWorkers = await Worker.find({});
     for (const w of allSecWorkers) {
+      const workerReviews = await Review.find({ workerId: w._id });
+      w.totalReviews = workerReviews.length;
+      if (workerReviews.length > 0) {
+        const sum = workerReviews.reduce((acc, r) => acc + r.rating, 0);
+        w.rating = Math.round((sum / workerReviews.length) * 10) / 10;
+      } else {
+        w.rating = 0;
+      }
       await w.save();
     }
 

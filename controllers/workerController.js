@@ -1,5 +1,6 @@
 import { Worker } from "../models/workerModel.js";
 import { User } from "../models/userModel.js";
+import { Review } from "../models/reviewModel.js";
 import { v2 as cloudinary } from "cloudinary";
 import fs from "fs/promises";
 import path from "path";
@@ -146,10 +147,18 @@ export const getWorkerBySlug = async (req, res) => {
       return res.status(404).json({ message: "Worker not found or not approved" });
     }
 
+    // Sync totalReviews count with actual Review collection
+    const actualReviewCount = await Review.countDocuments({ workerId: worker._id });
+    if (worker.totalReviews !== actualReviewCount) {
+      worker.totalReviews = actualReviewCount;
+      if (actualReviewCount === 0) {
+        worker.rating = 0;
+      }
+      await worker.save();
+    }
+
     const workerData = worker.toObject();
     delete workerData.aadhaarNumber; // Always hide Aadhaar
-
-
 
     return res.status(200).json({
       success: true,
@@ -169,10 +178,27 @@ export const getWorkerById = async (req, res) => {
       return res.status(404).json({ message: "Worker not found" });
     }
 
-    // Increment profile view count if the viewer is not the worker themselves
-    if (worker.userId.toString() !== req.user.id) {
-      worker.profileViews = (worker.profileViews || 0) + 1;
+    // Sync totalReviews count with actual Review collection
+    const actualReviewCount = await Review.countDocuments({ workerId: worker._id });
+    if (worker.totalReviews !== actualReviewCount) {
+      worker.totalReviews = actualReviewCount;
+      if (actualReviewCount === 0) {
+        worker.rating = 0;
+      }
       await worker.save();
+    }
+
+    // Increment profile view count ONLY if the viewer is not the worker themselves and hasn't viewed before (1 user = 1 view)
+    if (req.user && req.user.id && worker.userId.toString() !== req.user.id) {
+      const viewerIdStr = req.user.id.toString();
+      const hasViewed = worker.viewedBy && worker.viewedBy.some((uid) => uid.toString() === viewerIdStr);
+
+      if (!hasViewed) {
+        if (!worker.viewedBy) worker.viewedBy = [];
+        worker.viewedBy.push(req.user.id);
+        worker.profileViews = Math.max((worker.profileViews || 0) + 1, worker.viewedBy.length);
+        await worker.save();
+      }
     }
 
     const workerData = worker.toObject();
@@ -314,7 +340,7 @@ export const uploadProfileImage = async (req, res) => {
     }
 
     // Expecting base64 image data url (e.g. data:image/png;base64,...)
-    const matches = image.match(/^data:([^;]+);base64,(.+)$/);
+    const matches = image.match(/^data:([^;]+);base64,(.*)$/);
     if (!matches || matches.length !== 3) {
       return res.status(400).json({ message: "Invalid image format. Must be base64 data URL." });
     }
@@ -322,6 +348,15 @@ export const uploadProfileImage = async (req, res) => {
     const imageType = matches[1]; // e.g. 'image/png'
     const base64Data = matches[2];
     const buffer = Buffer.from(base64Data, "base64");
+
+    const MAX_SIZE_BYTES = 1 * 1024 * 1024; // 1MB in bytes (1048576)
+    if (buffer.length === 0) {
+      return res.status(400).json({ message: "Profile photo file cannot be empty." });
+    }
+
+    if (buffer.length > MAX_SIZE_BYTES) {
+      return res.status(400).json({ message: "Profile photo file size must be between 0 and 1MB (maximum 1MB)." });
+    }
 
     // Check if Cloudinary is configured
     if (process.env.CLOUDINARY_CLOUD_NAME) {
