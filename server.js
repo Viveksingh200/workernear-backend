@@ -33,12 +33,24 @@ app.listen(PORT, () => {
     console.log("app is listening at port 5000");
 });
 
-(async function connectDB(){
-    try {
-        await mongoose.connect(process.env.MONGO_URI);
-        console.log("mongodb connected successfully");
-    } catch (error) {
-        console.log("connection failed", error);
-        process.exit(1);
+async function connectDB(retries = 5, delay = 3000) {
+    for (let i = 1; i <= retries; i++) {
+        try {
+            await mongoose.connect(process.env.MONGO_URI, {
+                serverSelectionTimeoutMS: 5000,
+            });
+            console.log("mongodb connected successfully");
+            return;
+        } catch (error) {
+            console.error(`MongoDB connection attempt ${i} of ${retries} failed:`, error.message);
+            if (i < retries) {
+                console.log(`Retrying connection in ${delay / 1000}s...`);
+                await new Promise((res) => setTimeout(res, delay));
+            } else {
+                console.error("All MongoDB connection attempts failed. Check your internet connection or MongoDB Atlas IP Access List.");
+            }
+        }
     }
-})()
+}
+
+connectDB();

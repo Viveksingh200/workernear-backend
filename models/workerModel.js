@@ -15,16 +15,29 @@ const workerSchema = new mongoose.Schema(
     },
     phone: {
       type: String,
-      required: true,
+      default: "",
       trim: true
     },
 
     profession: {
       type: String,
-      default: "Pending Setup",
+      default: "",
       trim: true
     },
+    serviceCategories: {
+      type: [String],
+      default: []
+    },
+    serviceAreas: {
+      type: [String],
+      default: []
+    },
     description: {
+      type: String,
+      default: "",
+      trim: true
+    },
+    description_hi: {
       type: String,
       default: "",
       trim: true
@@ -39,12 +52,12 @@ const workerSchema = new mongoose.Schema(
     },
     city: {
       type: String,
-      required: true,
+      default: "",
       trim: true
     },
     area: {
       type: String,
-      required: true,
+      default: "",
       trim: true
     },
     country: {

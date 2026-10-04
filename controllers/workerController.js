@@ -24,9 +24,12 @@ export const getAllWorkers = async (req, res) => {
     const filter = { approved: true };
 
     if (category) {
+      const cleanCat = category.trim();
+      const baseCat = cleanCat.replace(/s$/i, "").replace(/ing$/i, "");
+      const catRegex = new RegExp(`${cleanCat}|${baseCat}`, "i");
       filter.$or = [
-        { serviceCategories: { $in: [new RegExp(category, "i")] } },
-        { profession: new RegExp(category, "i") }
+        { serviceCategories: { $regex: catRegex } },
+        { profession: catRegex }
       ];
     }
 
@@ -38,9 +41,14 @@ export const getAllWorkers = async (req, res) => {
         const parts = city.split(",");
         parsedArea = parts[0].trim();
         parsedCity = parts[1].trim();
-        filter.city = new RegExp(parsedCity, "i");
       } else {
         parsedCity = city.trim();
+      }
+
+      if (parsedCity.toLowerCase() === "mumbai") {
+        const mmrPattern = "Mumbai|Navi Mumbai|Thane|Bhiwandi|Palghar|Kalyan|Dombivli|Mira Bhayandar|Ulhasnagar";
+        filter.city = new RegExp(mmrPattern, "i");
+      } else {
         filter.city = new RegExp(parsedCity, "i");
       }
     }
@@ -54,18 +62,49 @@ export const getAllWorkers = async (req, res) => {
     }
 
     if (search) {
+      const cleanPhoneSearch = search.replace(/\D/g, "");
       const searchOr = [
         { name: new RegExp(search, "i") },
         { profession: new RegExp(search, "i") },
-        { serviceCategories: { $in: [new RegExp(search, "i")] } },
+        { serviceCategories: { $regex: new RegExp(search, "i") } },
         { city: new RegExp(search, "i") },
         { area: new RegExp(search, "i") }
       ];
-      if (filter.$or) {
-        filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
-        delete filter.$or;
+      if (cleanPhoneSearch && cleanPhoneSearch.length >= 4) {
+        searchOr.push({ phone: new RegExp(cleanPhoneSearch, "i") });
+      }
+
+      // If user is searching by specific business name or phone, allow matching even if city filter differs
+      if (filter.city) {
+        const cityFilter = filter.city;
+        delete filter.city;
+        const searchWithNameOrPhone = [
+          { name: new RegExp(search, "i") }
+        ];
+        if (cleanPhoneSearch && cleanPhoneSearch.length >= 4) {
+          searchWithNameOrPhone.push({ phone: new RegExp(cleanPhoneSearch, "i") });
+        }
+        
+        const generalMatchWithCity = {
+          $and: [
+            { city: cityFilter },
+            { $or: searchOr }
+          ]
+        };
+
+        if (filter.$or) {
+          filter.$and = [{ $or: filter.$or }, { $or: [...searchWithNameOrPhone, generalMatchWithCity] }];
+          delete filter.$or;
+        } else {
+          filter.$or = [...searchWithNameOrPhone, generalMatchWithCity];
+        }
       } else {
-        filter.$or = searchOr;
+        if (filter.$or) {
+          filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+          delete filter.$or;
+        } else {
+          filter.$or = searchOr;
+        }
       }
     }
 
@@ -232,6 +271,7 @@ export const updateWorkerProfile = async (req, res) => {
       "profession",
       "experience",
       "description",
+      "description_hi",
       "serviceCategories",
       "serviceAreas",
       "city",
@@ -242,29 +282,22 @@ export const updateWorkerProfile = async (req, res) => {
 
     editableFields.forEach((field) => {
       if (req.body[field] !== undefined) {
-        if (field === "profession" && (!req.body[field] || req.body[field].toString().trim() === "")) {
-          worker[field] = "Pending Setup";
-        } else {
-          worker[field] = req.body[field];
-        }
+        worker[field] = req.body[field];
       }
     });
 
-    if (!worker.profession || worker.profession.trim() === "") {
-      worker.profession = "Pending Setup";
-    }
-
-    if (worker.profession && worker.profession !== "Pending Setup" && (!worker.serviceCategories || worker.serviceCategories.length === 0)) {
+    if (worker.profession && worker.profession.trim() !== "" && (!worker.serviceCategories || worker.serviceCategories.length === 0)) {
       worker.serviceCategories = [worker.profession];
     }
 
     if (req.body.name !== undefined || req.body.profession !== undefined) {
-      const oldFormatSlug = `${slugify(worker.name)}-${worker.phone.toString().slice(-4)}`;
+      const phoneSuffix = (worker.phone || "").toString().slice(-4) || "1000";
+      const oldFormatSlug = `${slugify(worker.name)}-${phoneSuffix}`;
       if (worker.slug === oldFormatSlug) {
         const nameForSlug = req.body.name || worker.name;
         const professionForSlug = req.body.profession !== undefined ? req.body.profession : worker.profession;
         const baseSlug = slugify(nameForSlug);
-        const suffix = worker.phone.toString().slice(-4);
+        const suffix = (worker.phone || "").toString().slice(-4) || "1000";
         const professionSlugPart = professionForSlug && professionForSlug !== "Pending Setup" ? `${slugify(professionForSlug)}-` : "";
         worker.slug = `${professionSlugPart}${baseSlug}-${suffix}`;
       }
@@ -277,6 +310,7 @@ export const updateWorkerProfile = async (req, res) => {
     if (user) {
       if (req.body.name !== undefined) user.name = req.body.name;
       if (req.body.email !== undefined) user.email = req.body.email;
+      if (req.body.phone !== undefined) user.phone = req.body.phone;
       if (req.body.city !== undefined) user.city = req.body.city;
       if (req.body.area !== undefined) user.area = req.body.area;
       if (req.body.country !== undefined) user.country = req.body.country;
